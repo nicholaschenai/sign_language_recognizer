@@ -104,5 +104,26 @@ class SelectorCV(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        # use 3 fold cv, but if length of sequences < 3 then use the length of sequence as number of folds
+        split_method = KFold(n_splits = len(self.sequences) if len(self.sequences) < 3 else 3)
+        best_num_components = None
+        best_logL = float("-inf")
+        for num_states in range(self.min_n_components,self.max_n_components+1):
+            logL_vec = [] # stores log likelihoods for each cv fold
+            for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+                X_train, lengths_train = combine_sequences(cv_train_idx,self.sequences)
+                hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
+                                    random_state=self.random_state, verbose=False).fit(X_train, lengths_train)
+                X_test, lengths_test = combine_sequences(cv_test_idx,self.sequences)                   
+                logL = hmm_model.score(X_test, lengths_test)
+                logL_vec.append(logL)
+            avg_logL = np.mean(logL_vec)
+            if avg_logL > best_logL:
+                best_num_components = num_states
+                best_logL = avg_logL
+        return self.base_model(best_num_components)
+            
+                
+                                    
+            
+        
