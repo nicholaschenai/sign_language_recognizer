@@ -76,9 +76,24 @@ class SelectorBIC(ModelSelector):
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
-
+        best_model = None
+        best_score = float("inf")
+        for num_states in range(self.min_n_components,self.max_n_components+1):
+            try:
+                hmm_model = self.base_model(num_states)
+                logL = hmm_model.score(self.X, self.lengths)
+                # Note to self: p is not so obvious, refer to the formula found at
+                # https://discussions.udacity.com/t/number-of-parameters-bic-calculation/233235/17
+                p = num_states ** 2 + 2 * num_states * hmm_model.n_features - 1
+                logN = np.log(len(self.X))
+                BIC_score = -2 * logL + p * logN
+                if BIC_score < best_score:
+                    best_model = hmm_model
+                    best_score = BIC_score
+            except:
+                continue
+            
+        return best_model
 
 class SelectorDIC(ModelSelector):
     ''' select best model based on Discriminative Information Criterion
@@ -92,9 +107,23 @@ class SelectorDIC(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
-
+        best_model = None
+        best_score = float("-inf")
+        for num_states in range(self.min_n_components,self.max_n_components+1):
+            try:
+                hmm_model = self.base_model(num_states)
+                logL = hmm_model.score(self.X, self.lengths)
+                # vector to store anti-loglikelihoods
+                anti_logL_vec = [hmm_model.score(X_other, lengths_other) 
+                for word, (X_other, lengths_other) in self.hwords.items() if word != self.this_word]
+                DIC_score = logL - np.mean(anti_logL_vec)
+                if DIC_score > best_score:
+                    best_model = hmm_model
+                    best_score = DIC_score
+            except:
+                continue
+            
+        return best_model
 
 class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
@@ -104,23 +133,30 @@ class SelectorCV(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # use 3 fold cv, but if length of sequences < 3 then use the length of sequence as number of folds
-        split_method = KFold(n_splits = len(self.sequences) if len(self.sequences) < 3 else 3)
         best_num_components = None
         best_logL = float("-inf")
         for num_states in range(self.min_n_components,self.max_n_components+1):
             logL_vec = [] # stores log likelihoods for each cv fold
-            for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
-                X_train, lengths_train = combine_sequences(cv_train_idx,self.sequences)
-                hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
-                                    random_state=self.random_state, verbose=False).fit(X_train, lengths_train)
-                X_test, lengths_test = combine_sequences(cv_test_idx,self.sequences)                   
-                logL = hmm_model.score(X_test, lengths_test)
-                logL_vec.append(logL)
-            avg_logL = np.mean(logL_vec)
-            if avg_logL > best_logL:
-                best_num_components = num_states
-                best_logL = avg_logL
+            try:
+                if len(self.sequences) > 1:
+                    # use 3 fold CV if possible
+                    split_method = KFold(n_splits = 2 if len(self.sequences) == 2 else 3)
+                    for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+                        X_train, lengths_train = combine_sequences(cv_train_idx,self.sequences)
+                        hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
+                                            random_state=self.random_state, verbose=False).fit(X_train, lengths_train)
+                        X_test, lengths_test = combine_sequences(cv_test_idx,self.sequences)                   
+                        logL_vec.append(hmm_model.score(X_test, lengths_test))
+                else:
+                    hmm_model = self.base_model(num_states)
+                    logL_vec.append(hmm_model.score(self.X, self.lengths))
+                avg_logL = np.mean(logL_vec)
+                if avg_logL > best_logL:
+                    best_num_components = num_states
+                    best_logL = avg_logL
+            except:
+                continue
+        # return base model trained on the whole training set 
         return self.base_model(best_num_components)
             
                 
